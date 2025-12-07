@@ -1,0 +1,1557 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>МИЛЛА</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: 'Press Start 2P', cursive;
+        }
+        
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        
+        #startScreen, #winScreen, #gameOverScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #0a0a12;
+            z-index: 100;
+        }
+        
+        #winScreen, #gameOverScreen {
+            display: none;
+        }
+        
+        .title {
+            font-size: clamp(24px, 8vw, 48px);
+            color: #fff;
+            text-shadow: 
+                4px 4px 0 #ff0080,
+                -2px -2px 0 #00ffff;
+            margin-bottom: 40px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .game-over-title {
+            font-size: clamp(20px, 6vw, 36px);
+            color: #ff0055;
+            text-shadow: 2px 2px 0 #fff;
+            margin-bottom: 30px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .start-btn {
+            font-family: 'Press Start 2P', cursive;
+            font-size: clamp(12px, 4vw, 20px);
+            padding: 20px 40px;
+            background: #0a0a12;
+            color: #fff;
+            border: 4px solid #fff;
+            cursor: pointer;
+            transition: all 0.1s;
+            text-transform: uppercase;
+        }
+        
+        .start-btn:hover, .start-btn:active {
+            background: #fff;
+            color: #0a0a12;
+            transform: scale(1.1);
+        }
+        
+        .hint {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #666;
+            font-size: clamp(8px, 2.5vw, 12px);
+            text-align: center;
+        }
+        
+        #heartCanvas {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="startScreen">
+        <div class="title">МИЛЛА</div>
+        <button class="start-btn" id="startBtn">ИГРАТЬ</button>
+        <div class="hint">Управляй касанием или мышкой</div>
+    </div>
+    
+    <div id="winScreen">
+        <canvas id="heartCanvas"></canvas>
+    </div>
+    
+    <div id="gameOverScreen">
+        <div class="game-over-title">GAME OVER</div>
+        <button class="start-btn" id="retryBtn">ЕЩЁ РАЗ</button>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+        // ============ AUDIO ENGINE (Спокойная версия) ============
+        class ChiptuneEngine {
+            constructor() {
+                this.ctx = null;
+                this.isPlaying = false;
+                this.tempo = 85; // Медленнее
+                this.noteIndex = 0;
+                this.nextNoteTime = 0;
+                
+                // Более спокойная мелодия
+                this.melody = [
+                    'E4', 'G4', 'A4', 'G4', 'E4', 'D4', 'E4', 'G4',
+                    'A4', 'B4', 'A4', 'G4', 'E4', 'D4', 'C4', 'D4',
+                    'E4', 'G4', 'A4', 'B4', 'C5', 'B4', 'A4', 'G4',
+                    'A4', 'G4', 'E4', 'D4', 'E4', 'G4', 'A4', 'E4'
+                ];
+                
+                this.bass = [
+                    'C2', 'C2', 'G2', 'G2', 'A2', 'A2', 'E2', 'E2',
+                    'F2', 'F2', 'C2', 'C2', 'G2', 'G2', 'C2', 'C2'
+                ];
+                
+                this.pad = [
+                    'C3', 'E3', 'G3', 'E3', 'A3', 'C3', 'E3', 'G3'
+                ];
+                
+                this.frequencies = {
+                    'C2': 65.41, 'D2': 73.42, 'E2': 82.41, 'F2': 87.31, 'G2': 98.00, 'A2': 110.00, 'B2': 123.47,
+                    'C3': 130.81, 'D3': 146.83, 'E3': 164.81, 'F3': 174.61, 'G3': 196.00, 'A3': 220.00, 'B3': 246.94,
+                    'C4': 261.63, 'D4': 293.66, 'E4': 329.63, 'F4': 349.23, 'G4': 392.00, 'A4': 440.00, 'B4': 493.88,
+                    'C5': 523.25, 'D5': 587.33, 'E5': 659.25, 'F5': 698.46, 'G5': 783.99, 'A5': 880.00, 'B5': 987.77,
+                    'C6': 1046.50
+                };
+            }
+            
+            init() {
+                if (this.ctx) return;
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            playNote(freq, time, duration, type = 'sine', volume = 0.1) {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, time);
+                
+                // Мягкая атака и затухание
+                gain.gain.setValueAtTime(0, time);
+                gain.gain.linearRampToValueAtTime(volume, time + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + duration * 0.95);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(time);
+                osc.stop(time + duration);
+            }
+            
+            scheduleNotes() {
+                const secondsPerBeat = 60.0 / this.tempo;
+                
+                while (this.nextNoteTime < this.ctx.currentTime + 0.1) {
+                    const melodyNote = this.melody[this.noteIndex % this.melody.length];
+                    const bassNote = this.bass[Math.floor(this.noteIndex / 2) % this.bass.length];
+                    const padNote = this.pad[Math.floor(this.noteIndex / 4) % this.pad.length];
+                    
+                    // Мелодия - мягкий синус
+                    this.playNote(this.frequencies[melodyNote], this.nextNoteTime, secondsPerBeat * 1.2, 'sine', 0.08);
+                    
+                    // Бас - треугольник
+                    if (this.noteIndex % 2 === 0) {
+                        this.playNote(this.frequencies[bassNote], this.nextNoteTime, secondsPerBeat * 2, 'triangle', 0.12);
+                    }
+                    
+                    // Пэд - долгие ноты для атмосферы
+                    if (this.noteIndex % 4 === 0) {
+                        this.playNote(this.frequencies[padNote], this.nextNoteTime, secondsPerBeat * 4, 'sine', 0.05);
+                    }
+                    
+                    this.nextNoteTime += secondsPerBeat * 0.5;
+                    this.noteIndex++;
+                }
+            }
+            
+            playExplosion() {
+                if (!this.ctx) return;
+                const time = this.ctx.currentTime;
+                
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, time);
+                osc.frequency.exponentialRampToValueAtTime(60, time + 0.15);
+                
+                gain.gain.setValueAtTime(0.2, time);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(time);
+                osc.stop(time + 0.15);
+            }
+            
+            playShoot() {
+                if (!this.ctx) return;
+                const time = this.ctx.currentTime;
+                
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(500, time);
+                osc.frequency.exponentialRampToValueAtTime(200, time + 0.06);
+                
+                gain.gain.setValueAtTime(0.08, time);
+                gain.gain.exponentialRampToValueAtTime(0.01, time + 0.06);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start(time);
+                osc.stop(time + 0.06);
+            }
+            
+            playPowerUp() {
+                if (!this.ctx) return;
+                const time = this.ctx.currentTime;
+                
+                [400, 500, 600, 800].forEach((freq, i) => {
+                    this.playNote(freq, time + i * 0.1, 0.2, 'sine', 0.1);
+                });
+            }
+            
+            playVictory() {
+                if (!this.ctx) return;
+                this.stop();
+                
+                const time = this.ctx.currentTime;
+                const notes = ['C4', 'E4', 'G4', 'C5', 'E5', 'G5', 'C6'];
+                
+                notes.forEach((note, i) => {
+                    this.playNote(this.frequencies[note], time + i * 0.2, 0.5, 'sine', 0.12);
+                });
+            }
+            
+            playGameOver() {
+                if (!this.ctx) return;
+                this.stop();
+                
+                const time = this.ctx.currentTime;
+                [300, 250, 200, 150].forEach((freq, i) => {
+                    this.playNote(freq, time + i * 0.25, 0.5, 'sine', 0.15);
+                });
+            }
+            
+            start() {
+                this.init();
+                if (this.isPlaying) return;
+                this.isPlaying = true;
+                this.nextNoteTime = this.ctx.currentTime;
+                this.scheduleLoop();
+            }
+            
+            scheduleLoop() {
+                if (!this.isPlaying) return;
+                this.scheduleNotes();
+                setTimeout(() => this.scheduleLoop(), 50);
+            }
+            
+            stop() {
+                this.isPlaying = false;
+            }
+        }
+        
+        // ============ GAME CONFIG ============
+        const GAME_W = 320;
+        const GAME_H = 480;
+        
+        const PHRASES = ['МИЛЛА', 'А ДАВАЙ', 'БУХАТЬ', 'НОЧЬЮ', 'ВДВОЁМ?', 'Я НЕ МАНЬЯК', 'ИЛИ...ДА?'];
+        
+        const PHRASE_COLORS = [
+            ['#FF0055', '#00FFAA', '#FFDD00', '#FF7700', '#AA55FF'],
+            ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181', '#AA96DA', '#FCBAD3'],
+            ['#00CED1', '#FF6347', '#FFD700', '#32CD32', '#FF69B4', '#9370DB'],
+            ['#FF4500', '#7B68EE', '#00FA9A', '#DC143C', '#1E90FF'],
+            ['#FFD700', '#FF1493', '#00BFFF', '#FF4500', '#ADFF2F', '#9400D3'],
+            ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181', '#AA96DA', '#FCBAD3', '#A8E6CF', '#FFD93D', '#6C5CE7'],
+            ['#FF0055', '#00FFAA', '#FFDD00', '#FF7700', '#AA55FF', '#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3']
+        ];
+        
+        // Толстые пиксельные буквы 8x10
+        const LETTERS = {
+            'М': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,0,0,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'И': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,1,1,1],
+                [1,1,0,0,1,1,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,1,1,0,0,1,1],
+                [1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'Л': [
+                [0,0,1,1,1,1,1,1],
+                [0,1,1,1,1,1,1,1],
+                [1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'А': [
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [1,1,1,0,0,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'Д': [
+                [0,0,1,1,1,1,1,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,1,0,0,1,1,0],
+                [0,1,1,0,0,1,1,0],
+                [0,1,1,0,0,1,1,0],
+                [0,1,1,0,0,1,1,0],
+                [1,1,1,0,0,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'В': [
+                [1,1,1,1,1,1,0,0],
+                [1,1,1,1,1,1,1,0],
+                [1,1,0,0,0,1,1,1],
+                [1,1,0,0,0,1,1,0],
+                [1,1,1,1,1,1,0,0],
+                [1,1,1,1,1,1,1,0],
+                [1,1,0,0,0,1,1,1],
+                [1,1,0,0,0,1,1,1],
+                [1,1,1,1,1,1,1,0],
+                [1,1,1,1,1,1,0,0]
+            ],
+            'Й': [
+                [0,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,1,1,1],
+                [1,1,0,0,1,1,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,1,1,0,0,1,1],
+                [1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'Б': [
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,1,1,1,1,1,0],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,0]
+            ],
+            'У': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,0,0,1,1,1],
+                [0,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,1,1,0,0,0,0],
+                [1,1,1,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0]
+            ],
+            'Х': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,0,0,1,1,1],
+                [0,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [1,1,1,0,0,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'Т': [
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0]
+            ],
+            'Ь': [
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,1,1,1,1,1,0],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,0]
+            ],
+            'Н': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'О': [
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [1,1,1,0,0,1,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,0,0,1,1,1],
+                [0,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,0,0]
+            ],
+            'Ч': [
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [0,1,1,1,1,1,1,1],
+                [0,0,0,0,0,0,1,1],
+                [0,0,0,0,0,0,1,1],
+                [0,0,0,0,0,0,1,1],
+                [0,0,0,0,0,0,1,1]
+            ],
+            'Ю': [
+                [1,1,0,0,1,1,1,0],
+                [1,1,0,1,1,1,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,1,1,1,0,1,1],
+                [1,1,1,1,1,0,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,0,1,1,0,1,1],
+                [1,1,0,1,1,1,1,1],
+                [1,1,0,0,1,1,1,0]
+            ],
+            'Е': [
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,1,1,1,1,0,0],
+                [1,1,1,1,1,1,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1]
+            ],
+            'Я': [
+                [0,0,1,1,1,1,1,1],
+                [0,1,1,1,1,1,1,1],
+                [1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1],
+                [0,1,1,1,1,1,1,1],
+                [0,0,1,1,1,1,1,1],
+                [0,0,0,1,1,0,1,1],
+                [0,0,1,1,0,0,1,1],
+                [0,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1]
+            ],
+            'К': [
+                [1,1,0,0,0,1,1,1],
+                [1,1,0,0,1,1,1,0],
+                [1,1,0,1,1,1,0,0],
+                [1,1,1,1,1,0,0,0],
+                [1,1,1,1,0,0,0,0],
+                [1,1,1,1,0,0,0,0],
+                [1,1,1,1,1,0,0,0],
+                [1,1,0,1,1,1,0,0],
+                [1,1,0,0,1,1,1,0],
+                [1,1,0,0,0,1,1,1]
+            ],
+            '?': [
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [1,1,0,0,0,0,1,1],
+                [0,0,0,0,0,1,1,1],
+                [0,0,0,0,1,1,1,0],
+                [0,0,0,1,1,1,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,1,1,0,0,0]
+            ],
+            '.': [
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,1,1,1,1,0,0]
+            ],
+            ' ': [
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,0]
+            ]
+        };
+        
+        // ============ GAME STATE ============
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const audio = new ChiptuneEngine();
+        
+        let W, H, scale;
+        
+        // Зона движения персонажа
+        const PLAYER_ZONE = {
+            minX: 30,
+            maxX: GAME_W - 30,
+            minY: GAME_H - 100,
+            maxY: GAME_H - 40
+        };
+        
+        let player = { 
+            x: GAME_W / 2, 
+            y: GAME_H - 60, 
+            targetX: GAME_W / 2, 
+            targetY: GAME_H - 60,
+            facing: 1 
+        };
+        
+        let bullets = [];
+        let blocks = [];
+        let particles = [];
+        let stars = [];
+        let powerUps = [];
+        let bgShapes = []; // Абстрактный фон
+        let screenShake = 0;
+        let gameState = 'start';
+        let lastShot = 0;
+        let time = 0;
+        let currentPhraseIndex = 0;
+        let pauseTimer = 0;
+        let isPaused = true; // Начинаем с паузы
+        let fallSpeed = 0.05;
+        
+        // Power-up состояния
+        let rapidFire = 0;
+        let tripleShot = 0;
+        let laserMode = 0;
+        let bombMode = 0;
+        
+        // ============ RESIZE ============
+        function resize() {
+            const ratio = GAME_W / GAME_H;
+            if (window.innerWidth / window.innerHeight > ratio) {
+                H = window.innerHeight;
+                W = H * ratio;
+            } else {
+                W = window.innerWidth;
+                H = W / ratio;
+            }
+            canvas.width = GAME_W;
+            canvas.height = GAME_H;
+            canvas.style.width = W + 'px';
+            canvas.style.height = H + 'px';
+            scale = W / GAME_W;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // ============ BACKGROUND ============
+        function initBackground() {
+            stars = [];
+            bgShapes = [];
+            
+            // Звёзды
+            for (let i = 0; i < 40; i++) {
+                stars.push({
+                    x: Math.random() * GAME_W,
+                    y: Math.random() * GAME_H,
+                    speed: 0.3 + Math.random() * 1,
+                    size: Math.random() < 0.3 ? 2 : 1,
+                    brightness: 0.2 + Math.random() * 0.5
+                });
+            }
+            
+            // Абстрактные геометрические фигуры (архитектурный стиль)
+            for (let i = 0; i < 8; i++) {
+                bgShapes.push({
+                    x: Math.random() * GAME_W,
+                    y: Math.random() * GAME_H * 0.7,
+                    size: 20 + Math.random() * 60,
+                    type: ['rect', 'triangle', 'line', 'circle'][Math.floor(Math.random() * 4)],
+                    rotation: Math.random() * Math.PI,
+                    rotSpeed: (Math.random() - 0.5) * 0.01,
+                    color: `hsla(${200 + Math.random() * 60}, 50%, 50%, 0.1)`,
+                    drift: Math.random() * 0.2
+                });
+            }
+        }
+        
+        // ============ BLOCKS ============
+        function createBlocksForPhrase(phrase, colors) {
+            const blockSize = 7; // Чуть крупнее
+            const letterWidth = 8 * blockSize;
+            const spacing = 6;
+            
+            let totalWidth = 0;
+            for (let char of phrase) {
+                if (LETTERS[char]) {
+                    totalWidth += letterWidth + spacing;
+                }
+            }
+            totalWidth -= spacing;
+            
+            // Если слишком широко — уменьшаем
+            let scale = 1;
+            if (totalWidth > GAME_W - 20) {
+                scale = (GAME_W - 20) / totalWidth;
+            }
+            
+            const actualBlockSize = blockSize * scale;
+            const actualLetterWidth = 8 * actualBlockSize;
+            const actualSpacing = spacing * scale;
+            
+            totalWidth = 0;
+            for (let char of phrase) {
+                if (LETTERS[char]) {
+                    totalWidth += actualLetterWidth + actualSpacing;
+                }
+            }
+            totalWidth -= actualSpacing;
+            
+            const startX = (GAME_W - totalWidth) / 2;
+            const startY = 30;
+            
+            let colorIndex = 0;
+            let offsetX = startX;
+            
+            for (let l = 0; l < phrase.length; l++) {
+                const char = phrase[l];
+                const letterData = LETTERS[char];
+                if (!letterData) continue;
+                
+                const color = colors[colorIndex % colors.length];
+                colorIndex++;
+                
+                for (let row = 0; row < letterData.length; row++) {
+                    for (let col = 0; col < letterData[row].length; col++) {
+                        if (letterData[row][col]) {
+                            blocks.push({
+                                x: offsetX + col * actualBlockSize,
+                                y: startY + row * actualBlockSize,
+                                baseX: offsetX + col * actualBlockSize,
+                                size: actualBlockSize,
+                                color: color,
+                                health: 1,
+                                phase: Math.random() * Math.PI * 2
+                            });
+                        }
+                    }
+                }
+                offsetX += actualLetterWidth + actualSpacing;
+            }
+        }
+        
+        function initGame() {
+            blocks = [];
+            bullets = [];
+            particles = [];
+            powerUps = [];
+            currentPhraseIndex = 0;
+            pauseTimer = 60; // 1 секунда пауза в начале
+            isPaused = true;
+            rapidFire = 0;
+            tripleShot = 0;
+            laserMode = 0;
+            bombMode = 0;
+            player = { 
+                x: GAME_W / 2, 
+                y: GAME_H - 60, 
+                targetX: GAME_W / 2, 
+                targetY: GAME_H - 60,
+                facing: 1 
+            };
+            
+            createBlocksForPhrase(PHRASES[0], PHRASE_COLORS[0]);
+        }
+        
+        // ============ PARTICLES ============
+        function createParticles(x, y, color, count = 8) {
+            for (let i = 0; i < count; i++) {
+                const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+                const speed = 1.5 + Math.random() * 2.5;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    color: color,
+                    size: 2 + Math.random() * 3,
+                    life: 1
+                });
+            }
+        }
+        
+        function createExplosion(x, y) {
+            for (let i = 0; i < 25; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1 + Math.random() * 5;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    color: ['#ff0', '#f80', '#f00', '#fff'][Math.floor(Math.random() * 4)],
+                    size: 2 + Math.random() * 5,
+                    life: 1
+                });
+            }
+        }
+        
+        // Эффект выстрела (вспышка)
+        function createMuzzleFlash(x, y) {
+            for (let i = 0; i < 5; i++) {
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 6,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: -Math.random() * 3 - 1,
+                    color: '#fff',
+                    size: 2 + Math.random() * 2,
+                    life: 0.5
+                });
+            }
+        }
+        
+        // ============ POWER-UPS ============
+        function spawnPowerUp(x, y) {
+            if (Math.random() > 0.12) return;
+            
+            const types = ['rapid', 'triple', 'laser', 'bomb'];
+            const type = types[Math.floor(Math.random() * types.length)];
+            const colors = {
+                'rapid': '#ff0',
+                'triple': '#0ff',
+                'laser': '#f0f',
+                'bomb': '#f80'
+            };
+            
+            powerUps.push({
+                x: x,
+                y: y,
+                type: type,
+                color: colors[type],
+                vy: 0.3
+            });
+        }
+        
+        function applyPowerUp(type) {
+            audio.playPowerUp();
+            switch(type) {
+                case 'rapid': rapidFire = 350; break;
+                case 'triple': tripleShot = 300; break;
+                case 'laser': laserMode = 250; break;
+                case 'bomb': bombMode = 200; break;
+            }
+        }
+        
+        // ============ SHOOTING ============
+        function shoot() {
+            if (isPaused) return;
+            
+            const now = Date.now();
+            const fireRate = rapidFire > 0 ? 180 : 400;
+            
+            if (now - lastShot > fireRate) {
+                const bulletX = player.x + (player.facing * 12);
+                const bulletY = player.y - 25;
+                
+                createMuzzleFlash(bulletX, bulletY - 5);
+                
+                if (laserMode > 0) {
+                    bullets.push({
+                        x: bulletX,
+                        y: bulletY,
+                        vy: -10,
+                        isLaser: true,
+                        piercing: true,
+                        trail: []
+                    });
+                } else if (bombMode > 0) {
+                    bullets.push({
+                        x: bulletX,
+                        y: bulletY,
+                        vy: -5,
+                        isBomb: true,
+                        trail: []
+                    });
+                } else if (tripleShot > 0) {
+                    bullets.push({ x: bulletX, y: bulletY, vy: -4, vx: 0, trail: [] });
+                    bullets.push({ x: bulletX - 6, y: bulletY + 3, vy: -5.5, vx: -1.2, trail: [] });
+                    bullets.push({ x: bulletX + 6, y: bulletY + 3, vy: -5.5, vx: 1.2, trail: [] });
+                } else {
+                    bullets.push({
+                        x: bulletX,
+                        y: bulletY,
+                        vy: -6,
+                        vx: 0,
+                        trail: []
+                    });
+                }
+                lastShot = now;
+                audio.playShoot();
+            }
+        }
+        
+        // ============ UPDATE ============
+        function update() {
+            time += 0.016;
+            
+            // Пауза в начале фразы
+            if (isPaused) {
+                pauseTimer--;
+                if (pauseTimer <= 0) {
+                    isPaused = false;
+                }
+                // Во время паузы только рисуем, не стреляем
+                return;
+            }
+            
+            // Power-up таймеры
+            if (rapidFire > 0) rapidFire--;
+            if (tripleShot > 0) tripleShot--;
+            if (laserMode > 0) laserMode--;
+            if (bombMode > 0) bombMode--;
+            
+            // Движение игрока (более медленное)
+            const dx = player.targetX - player.x;
+            const dy = player.targetY - player.y;
+            player.x += dx * 0.06; // Медленнее
+            player.y += dy * 0.06;
+            player.facing = dx > 2 ? 1 : dx < -2 ? -1 : player.facing;
+            
+            // Ограничение зоны
+            player.x = Math.max(PLAYER_ZONE.minX, Math.min(PLAYER_ZONE.maxX, player.x));
+            player.y = Math.max(PLAYER_ZONE.minY, Math.min(PLAYER_ZONE.maxY, player.y));
+            
+            // Автострельба
+            shoot();
+            
+            // Фон
+            stars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > GAME_H) {
+                    star.y = 0;
+                    star.x = Math.random() * GAME_W;
+                }
+            });
+            
+            bgShapes.forEach(shape => {
+                shape.rotation += shape.rotSpeed;
+                shape.y += shape.drift;
+                if (shape.y > GAME_H * 0.7) {
+                    shape.y = -shape.size;
+                    shape.x = Math.random() * GAME_W;
+                }
+            });
+            
+            // Блоки падают (очень медленное покачивание)
+            blocks.forEach(block => {
+                block.y += fallSpeed;
+                block.x = block.baseX + Math.sin(time * 0.5 + block.phase) * 0.5;
+            });
+            
+            // Проверка проигрыша
+            for (let block of blocks) {
+                if (block.y + block.size > PLAYER_ZONE.minY - 10) {
+                    gameState = 'gameover';
+                    audio.playGameOver();
+                    document.getElementById('gameOverScreen').style.display = 'flex';
+                    return;
+                }
+            }
+            
+            // Пули с хвостами
+            bullets.forEach(bullet => {
+                // Сохраняем след
+                bullet.trail.push({ x: bullet.x, y: bullet.y });
+                if (bullet.trail.length > 8) bullet.trail.shift();
+                
+                bullet.y += bullet.vy;
+                if (bullet.vx) bullet.x += bullet.vx;
+            });
+            bullets = bullets.filter(b => b.y > -20 && b.x > 0 && b.x < GAME_W);
+            
+            // Коллизии
+            bullets = bullets.filter(bullet => {
+                let hit = false;
+                
+                if (bullet.isBomb) {
+                    for (let i = blocks.length - 1; i >= 0; i--) {
+                        const block = blocks[i];
+                        if (bullet.x > block.x - 15 && 
+                            bullet.x < block.x + block.size + 15 &&
+                            bullet.y > block.y - 15 && 
+                            bullet.y < block.y + block.size + 15) {
+                            
+                            const bx = bullet.x;
+                            const by = bullet.y;
+                            const radius = 45;
+                            
+                            for (let j = blocks.length - 1; j >= 0; j--) {
+                                const b = blocks[j];
+                                const dist = Math.hypot(b.x - bx, b.y - by);
+                                if (dist < radius) {
+                                    createParticles(b.x + b.size/2, b.y + b.size/2, b.color, 6);
+                                    spawnPowerUp(b.x, b.y);
+                                    blocks.splice(j, 1);
+                                }
+                            }
+                            
+                            createExplosion(bx, by);
+                            screenShake = 8;
+                            audio.playExplosion();
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                
+                for (let i = blocks.length - 1; i >= 0; i--) {
+                    const block = blocks[i];
+                    if (bullet.x > block.x && 
+                        bullet.x < block.x + block.size &&
+                        bullet.y > block.y && 
+                        bullet.y < block.y + block.size) {
+                        
+                        block.health--;
+                        if (block.health <= 0) {
+                            createParticles(block.x + block.size/2, block.y + block.size/2, block.color, 8);
+                            spawnPowerUp(block.x, block.y);
+                            blocks.splice(i, 1);
+                            screenShake = 2;
+                            audio.playExplosion();
+                        }
+                        
+                        hit = true;
+                        if (!bullet.piercing) break;
+                    }
+                }
+                
+                return bullet.piercing ? true : !hit;
+            });
+            
+            // Power-ups
+            powerUps.forEach(p => { p.y += p.vy; });
+            
+            powerUps = powerUps.filter(p => {
+                const dist = Math.hypot(p.x - player.x, p.y - player.y);
+                if (dist < 25) {
+                    applyPowerUp(p.type);
+                    return false;
+                }
+                return p.y < GAME_H + 20;
+            });
+            
+            // Частицы
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.08;
+                p.life -= 0.025;
+                p.size *= 0.97;
+            });
+            particles = particles.filter(p => p.life > 0);
+            
+            // Тряска
+            if (screenShake > 0) screenShake *= 0.85;
+            
+            // Следующая фраза
+            if (blocks.length === 0 && !isPaused) {
+                currentPhraseIndex++;
+                if (currentPhraseIndex >= PHRASES.length) {
+                    gameState = 'win';
+                    audio.playVictory();
+                    setTimeout(showWinScreen, 500);
+                } else {
+                    // Пауза перед новой фразой
+                    isPaused = true;
+                    pauseTimer = 80; // ~1.3 секунды
+                    createBlocksForPhrase(PHRASES[currentPhraseIndex], PHRASE_COLORS[currentPhraseIndex]);
+                }
+            }
+        }
+        
+        // ============ DRAW ============
+        function draw() {
+            ctx.save();
+            if (screenShake > 0.5) {
+                ctx.translate(
+                    (Math.random() - 0.5) * screenShake,
+                    (Math.random() - 0.5) * screenShake
+                );
+            }
+            
+            // Градиентный фон
+            const gradient = ctx.createLinearGradient(0, 0, 0, GAME_H);
+            gradient.addColorStop(0, '#0a0a18');
+            gradient.addColorStop(0.5, '#12122a');
+            gradient.addColorStop(1, '#1a1a35');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, GAME_W, GAME_H);
+            
+            // Абстрактные фигуры (архитектурный стиль)
+            bgShapes.forEach(shape => {
+                ctx.save();
+                ctx.translate(shape.x, shape.y);
+                ctx.rotate(shape.rotation);
+                ctx.strokeStyle = shape.color;
+                ctx.lineWidth = 2;
+                
+                if (shape.type === 'rect') {
+                    ctx.strokeRect(-shape.size/2, -shape.size/2, shape.size, shape.size);
+                } else if (shape.type === 'triangle') {
+                    ctx.beginPath();
+                    ctx.moveTo(0, -shape.size/2);
+                    ctx.lineTo(shape.size/2, shape.size/2);
+                    ctx.lineTo(-shape.size/2, shape.size/2);
+                    ctx.closePath();
+                    ctx.stroke();
+                } else if (shape.type === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(-shape.size/2, 0);
+                    ctx.lineTo(shape.size/2, 0);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(0, -shape.size/2);
+                    ctx.lineTo(0, shape.size/2);
+                    ctx.stroke();
+                } else if (shape.type === 'circle') {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, shape.size/2, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            });
+            
+            // Звёзды
+            stars.forEach(star => {
+                const alpha = star.brightness * (0.5 + Math.sin(time * 2 + star.x) * 0.3);
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
+            
+            // Платформа/дорожка
+            drawPlatform();
+            
+            // Блоки
+            blocks.forEach(block => {
+                // Свечение
+                ctx.fillStyle = block.color + '33';
+                ctx.fillRect(block.x - 2, block.y - 2, block.size + 4, block.size + 4);
+                
+                // Основной блок
+                ctx.fillStyle = block.color;
+                ctx.fillRect(block.x, block.y, block.size, block.size);
+                
+                // Блик
+                ctx.fillStyle = 'rgba(255,255,255,0.25)';
+                ctx.fillRect(block.x, block.y, block.size * 0.4, block.size * 0.4);
+            });
+            
+            // Пули с эффектом
+            bullets.forEach(bullet => {
+                // След
+                if (bullet.trail.length > 1) {
+                    for (let i = 0; i < bullet.trail.length - 1; i++) {
+                        const alpha = i / bullet.trail.length * 0.5;
+                        const t = bullet.trail[i];
+                        
+                        if (bullet.isLaser) {
+                            ctx.fillStyle = `rgba(255, 0, 255, ${alpha})`;
+                            ctx.fillRect(t.x - 2, t.y, 4, 4);
+                        } else if (bullet.isBomb) {
+                            ctx.fillStyle = `rgba(255, 136, 0, ${alpha})`;
+                            ctx.beginPath();
+                            ctx.arc(t.x, t.y, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        } else {
+                            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                            ctx.fillRect(t.x - 1, t.y, 2, 3);
+                        }
+                    }
+                }
+                
+                // Сама пуля
+                if (bullet.isLaser) {
+                    ctx.fillStyle = '#f0f';
+                    ctx.fillRect(bullet.x - 3, bullet.y - 8, 6, 16);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(bullet.x - 1, bullet.y - 6, 2, 12);
+                } else if (bullet.isBomb) {
+                    // Бомба с огненным хвостом
+                    ctx.fillStyle = '#f80';
+                    ctx.beginPath();
+                    ctx.arc(bullet.x, bullet.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ff0';
+                    ctx.beginPath();
+                    ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // Обычная пуля со свечением
+                    ctx.fillStyle = 'rgba(255, 255, 200, 0.5)';
+                    ctx.beginPath();
+                    ctx.arc(bullet.x, bullet.y, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(bullet.x - 2, bullet.y - 6, 8, 12);
+                    
+                    ctx.fillStyle = '#ff8';
+                    ctx.fillRect(bullet.x - 1, bullet.y - 3, 2, 6);
+                }
+            });
+            
+            // Power-ups
+            powerUps.forEach(p => {
+                ctx.fillStyle = p.color + '44';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - 6, p.y - 6, 12, 12);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+            });
+            
+            // Девушка
+            drawPlayer();
+            
+            // Частицы
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+            });
+            ctx.globalAlpha = 1;
+            
+            // UI - активные power-ups
+            let uiX = 10;
+            const uiY = 10;
+            if (rapidFire > 0) {
+                ctx.fillStyle = '#ff0';
+                ctx.fillRect(uiX, uiY, 16, 5);
+                ctx.fillStyle = '#000';
+                ctx.fillRect(uiX + 16 * (1 - rapidFire/350), uiY, 16 * (rapidFire/350), 5);
+                uiX += 22;
+            }
+            if (tripleShot > 0) {
+                ctx.fillStyle = '#0ff';
+                ctx.fillRect(uiX, uiY, 16, 5);
+                uiX += 22;
+            }
+            if (laserMode > 0) {
+                ctx.fillStyle = '#f0f';
+                ctx.fillRect(uiX, uiY, 16, 5);
+                uiX += 22;
+            }
+            if (bombMode > 0) {
+                ctx.fillStyle = '#f80';
+                ctx.fillRect(uiX, uiY, 16, 5);
+            }
+            
+            // Индикатор паузы
+            if (isPaused && gameState === 'playing') {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.font = '8px "Press Start 2P"';
+                ctx.textAlign = 'center';
+                ctx.fillText('ГОТОВЬСЯ...', GAME_W / 2, GAME_H / 2 + 60);
+            }
+            
+            ctx.restore();
+        }
+        
+        function drawPlatform() {
+            // Архитектурная платформа
+            const platformY = PLAYER_ZONE.maxY + 15;
+            
+            // Основание
+            ctx.fillStyle = '#2a2a4a';
+            ctx.fillRect(10, platformY, GAME_W - 20, 25);
+            
+            // Геометрический узор
+            ctx.strokeStyle = '#4a4a7a';
+            ctx.lineWidth = 1;
+            
+            for (let x = 20; x < GAME_W - 20; x += 20) {
+                ctx.beginPath();
+                ctx.moveTo(x, platformY);
+                ctx.lineTo(x, platformY + 25);
+                ctx.stroke();
+            }
+            
+            // Верхняя линия (светлая)
+            ctx.fillStyle = '#5a5a8a';
+            ctx.fillRect(10, platformY, GAME_W - 20, 3);
+            
+            // Декоративные элементы
+            ctx.fillStyle = '#6a6aaa';
+            ctx.fillRect(15, platformY + 8, 8, 8);
+            ctx.fillRect(GAME_W - 23, platformY + 8, 8, 8);
+            
+            // Зона движения (тонкая линия)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(PLAYER_ZONE.minX - 5, PLAYER_ZONE.minY - 5, 
+                          PLAYER_ZONE.maxX - PLAYER_ZONE.minX + 10, 
+                          PLAYER_ZONE.maxY - PLAYER_ZONE.minY + 10);
+            ctx.setLineDash([]);
+        }
+        
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            
+            const facing = player.facing;
+            ctx.scale(facing, 1);
+            
+            const px = (x, y, w, h, c) => {
+                ctx.fillStyle = c;
+                ctx.fillRect(x, y, w, h);
+            };
+            
+            // Тень
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(0, 18, 12, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // === ДЕВУШКА С КАРЕ ===
+            
+            // Волосы (светлые, каре)
+            px(-10, -32, 20, 6, '#f5deb3');  // Верх
+            px(-12, -26, 24, 14, '#f5deb3'); // Основная масса
+            px(-12, -12, 6, 8, '#f5deb3');   // Левая прядь
+            px(6, -12, 6, 8, '#f5deb3');     // Правая прядь
+            
+            // Более тёмные пряди для текстуры
+            px(-10, -28, 3, 12, '#e8d4a8');
+            px(2, -28, 3, 12, '#e8d4a8');
+            px(7, -26, 3, 10, '#e8d4a8');
+            
+            // Лицо
+            px(-7, -24, 14, 14, '#ffe4c4');
+            
+            // Румянец
+            px(-6, -15, 3, 2, '#ffb6c1');
+            px(3, -15, 3, 2, '#ffb6c1');
+            
+            // Глаза
+            px(-5, -20, 3, 4, '#fff');
+            px(2, -20, 3, 4, '#fff');
+            px(-4, -19, 2, 3, '#4a3728');
+            px(3, -19, 2, 3, '#4a3728');
+            
+            // Блик в глазах
+            px(-4, -20, 1, 1, '#fff');
+            px(3, -20, 1, 1, '#fff');
+            
+            // Брови
+            px(-5, -22, 3, 1, '#c9a86c');
+            px(2, -22, 3, 1, '#c9a86c');
+            
+            // Нос
+            px(0, -17, 1, 2, '#ecd4b4');
+            
+            // Улыбка
+            px(-2, -13, 4, 1, '#d4a5a5');
+            
+            // Шея
+            px(-2, -10, 4, 4, '#ffe4c4');
+            
+            // Тело (футболка)
+            px(-8, -6, 16, 14, '#fff');
+            px(-6, -4, 12, 10, '#f0f0f0');
+            
+            // Детали футболки
+            px(-1, -4, 2, 8, '#e8e8e8');
+            
+            // Руки
+            px(-12, -4, 4, 12, '#ffe4c4');
+            px(8, -4, 4, 10, '#ffe4c4');
+            
+            // Юбка
+            px(-9, 8, 18, 6, '#333');
+            px(-10, 10, 20, 4, '#2a2a2a');
+            
+            // Ноги
+            px(-6, 14, 4, 8, '#ffe4c4');
+            px(2, 14, 4, 8, '#ffe4c4');
+            
+            // Кеды
+            px(-7, 20, 6, 4, '#fff');
+            px(1, 20, 6, 4, '#fff');
+            px(-7, 22, 6, 2, '#333');
+            px(1, 22, 6, 2, '#333');
+            
+            // === ВИНТОВКА (всегда вверх) ===
+            ctx.save();
+            // Винтовка направлена вверх
+            
+            // Приклад
+            px(10, -2, 4, 8, '#5c4033');
+            px(11, 0, 3, 5, '#4a3528');
+            
+            // Ствол (вверх)
+            px(11, -30, 3, 28, '#555');
+            px(12, -32, 2, 30, '#444');
+            
+            // Детали
+            px(10, -8, 5, 3, '#666');
+            px(11, -32, 3, 2, '#777');
+            
+            // Вспышка при стрельбе
+            if (Date.now() - lastShot < 80 && !isPaused) {
+                px(9, -38, 7, 6, '#ff0');
+                px(10, -36, 5, 4, '#fff');
+            }
+            
+            ctx.restore();
+            ctx.restore();
+        }
+        
+        // ============ GAME LOOP ============
+        function gameLoop() {
+            if (gameState === 'playing') {
+                update();
+                draw();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // ============ INPUT ============
+        function handleInput(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (clientX - rect.left) / scale;
+            const y = (clientY - rect.top) / scale;
+            
+            player.targetX = Math.max(PLAYER_ZONE.minX, Math.min(PLAYER_ZONE.maxX, x));
+            player.targetY = Math.max(PLAYER_ZONE.minY, Math.min(PLAYER_ZONE.maxY, y));
+        }
+        
+        canvas.addEventListener('mousemove', e => {
+            if (gameState === 'playing') handleInput(e.clientX, e.clientY);
+        });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (gameState === 'playing' && e.touches[0]) {
+                handleInput(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            if (gameState === 'playing' && e.touches[0]) {
+                handleInput(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+        
+        // ============ SCREENS ============
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'none';
+            gameState = 'playing';
+            initBackground();
+            initGame();
+            audio.start();
+        }
+        
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('startBtn').addEventListener('touchend', e => {
+            e.preventDefault();
+            startGame();
+        });
+        
+        document.getElementById('retryBtn').addEventListener('click', startGame);
+        document.getElementById('retryBtn').addEventListener('touchend', e => {
+            e.preventDefault();
+            startGame();
+        });
+        
+        function showWinScreen() {
+            document.getElementById('winScreen').style.display = 'flex';
+            drawHeart();
+        }
+        
+        function drawHeart() {
+            const heartCanvas = document.getElementById('heartCanvas');
+            const hctx = heartCanvas.getContext('2d');
+            const size = Math.min(window.innerWidth, window.innerHeight) * 0.35;
+            heartCanvas.width = size;
+            heartCanvas.height = size;
+            
+            const heart = [
+                [0,0,1,1,0,0,0,1,1,0,0],
+                [0,1,1,1,1,0,1,1,1,1,0],
+                [1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1],
+                [0,1,1,1,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,1,1,1,0,0],
+                [0,0,0,1,1,1,1,1,0,0,0],
+                [0,0,0,0,1,1,1,0,0,0,0],
+                [0,0,0,0,0,1,0,0,0,0,0]
+            ];
+            
+            const pixelSize = size / 13;
+            const offsetX = (size - 11 * pixelSize) / 2;
+            const offsetY = (size - 10 * pixelSize) / 2;
+            
+            let pixelsDrawn = 0;
+            const totalPixels = heart.flat().filter(p => p).length;
+            
+            function animateHeart() {
+                hctx.clearRect(0, 0, size, size);
+                
+                let count = 0;
+                for (let row = 0; row < heart.length; row++) {
+                    for (let col = 0; col < heart[row].length; col++) {
+                        if (heart[row][col]) {
+                            if (count < pixelsDrawn) {
+                                const x = offsetX + col * pixelSize;
+                                const y = offsetY + row * pixelSize;
+                                
+                                const centerX = size / 2;
+                                const centerY = size / 2;
+                                const px = x + pixelSize / 2;
+                                const py = y + pixelSize / 2;
+                                
+                                const isWhiteSide = (px - py) < (centerX - centerY);
+                                
+                                if (isWhiteSide) {
+                                    hctx.fillStyle = '#222';
+                                    hctx.fillRect(x - 1, y - 1, pixelSize + 2, pixelSize + 2);
+                                    hctx.fillStyle = '#fff';
+                                    hctx.fillRect(x, y, pixelSize, pixelSize);
+                                } else {
+                                    hctx.fillStyle = '#fff';
+                                    hctx.fillRect(x - 1, y - 1, pixelSize + 2, pixelSize + 2);
+                                    hctx.fillStyle = '#111';
+                                    hctx.fillRect(x, y, pixelSize, pixelSize);
+                                }
+                            }
+                            count++;
+                        }
+                    }
+                }
+                
+                if (pixelsDrawn < totalPixels) {
+                    pixelsDrawn += 2;
+                    requestAnimationFrame(animateHeart);
+                }
+            }
+            
+            setTimeout(animateHeart, 300);
+        }
+        
+        // ============ INIT ============
+        initBackground();
+        gameLoop();
+    </script>
+</body>
+</html>
