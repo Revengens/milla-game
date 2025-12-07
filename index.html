@@ -853,7 +853,7 @@
             const fireRate = rapidFire > 0 ? 180 : 400;
             
             if (now - lastShot > fireRate) {
-                const bulletX = player.x + (player.facing * 12);
+                const bulletX = player.x;
                 const bulletY = player.y - 25;
                 
                 createMuzzleFlash(bulletX, bulletY - 5);
